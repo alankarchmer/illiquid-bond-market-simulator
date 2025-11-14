@@ -46,7 +46,7 @@ def test_market_state_jump_events():
     
     assert event is not None
     assert 'type' in event
-    assert event['type'] in ['sector_shock', 'issuer_downgrade']
+    assert event['type'] in ['market_shock', 'sector_shock', 'issuer_event']
 
 
 def test_market_impact_model_direct_impact():

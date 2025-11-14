@@ -15,13 +15,15 @@ from illiquid_market_sim.config import SimulationConfig
 from illiquid_market_sim.simulation import Simulator
 from illiquid_market_sim.agent import ManualQuotingStrategy
 from illiquid_market_sim.metrics import summarize_simulation
+from illiquid_market_sim.scenarios import get_scenarios, list_scenarios
 
 
 def run_simulation_mode(
     num_steps: int,
     num_bonds: int,
     verbose: bool,
-    random_seed: Optional[int]
+    random_seed: Optional[int],
+    scenario_name: Optional[str] = None
 ) -> None:
     """
     Run automated simulation with rule-based dealer.
@@ -31,6 +33,7 @@ def run_simulation_mode(
         num_bonds: Number of bonds in universe
         verbose: Whether to print detailed progress
         random_seed: Random seed for reproducibility
+        scenario_name: Name of scenario to run (None for default)
     """
     print("=" * 70)
     print("ILLIQUID BOND MARKET SIMULATOR - SIMULATION MODE")
@@ -44,18 +47,43 @@ def run_simulation_mode(
         random_seed=random_seed if random_seed is not None else 42
     )
     
+    # Get scenario if specified
+    scenario = None
+    if scenario_name:
+        scenarios = get_scenarios()
+        if scenario_name not in scenarios:
+            print(f"ERROR: Unknown scenario '{scenario_name}'")
+            print("\nAvailable scenarios:")
+            for name in scenarios.keys():
+                print(f"  - {name}")
+            sys.exit(1)
+        
+        scenario = scenarios[scenario_name]
+        print(f"Scenario: {scenario.name}")
+        print(f"  {scenario.description}")
+        print()
+    
     print("Configuration:")
     print(f"  Bonds: {config.num_bonds}")
     print(f"  Steps: {config.num_steps}")
-    print(f"  Clients: {config.num_real_money_clients} real money, "
-          f"{config.num_hedge_fund_clients} hedge funds, "
-          f"{config.num_fisher_clients} fishers, "
-          f"{config.num_noise_clients} noise")
+    
+    if scenario:
+        print(f"  Scenario: {scenario.name}")
+        print(f"  Base Volatility: {scenario.base_volatility:.4f}")
+        print(f"  Spread Drift: {scenario.spread_drift_bps_per_step:+.3f} bps/step")
+        print(f"  Buy/Sell Skew: {scenario.buy_sell_skew:+.2f}")
+        print(f"  Liquidity Multiplier: {scenario.liquidity_multiplier:.2f}x")
+    else:
+        print(f"  Clients: {config.num_real_money_clients} real money, "
+              f"{config.num_hedge_fund_clients} hedge funds, "
+              f"{config.num_fisher_clients} fishers, "
+              f"{config.num_noise_clients} noise")
+    
     print(f"  Seed: {config.random_seed}")
     print()
     
     # Run simulation
-    simulator = Simulator(config=config)
+    simulator = Simulator(config=config, scenario=scenario)
     result = simulator.run(verbose=verbose)
     
     # Print summary (already printed if verbose=True)
@@ -65,6 +93,10 @@ def run_simulation_mode(
     # Additional analytics
     print("\nADDITIONAL ANALYTICS")
     print("-" * 70)
+    
+    if scenario:
+        print(f"Scenario:          {scenario.name}")
+        print(f"Market Regime:     {scenario.description}")
     
     if result.pnl_history:
         from illiquid_market_sim.metrics import calculate_sharpe_ratio, calculate_max_drawdown
@@ -166,8 +198,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run a quick simulation
+  # List all available scenarios
+  python cli.py --list-scenarios
+  
+  # Run a quick simulation with default settings
   python cli.py --steps 50
+  
+  # Run with a specific scenario
+  python cli.py --scenario credit_shock --steps 200 --verbose
   
   # Run with more bonds and verbose output
   python cli.py --steps 100 --bonds 100 --verbose
@@ -176,8 +214,21 @@ Examples:
   python cli.py --game --steps 30
   
   # Run with specific seed for reproducibility
-  python cli.py --steps 100 --seed 123
+  python cli.py --scenario grind_tighter --steps 100 --seed 123
         """
+    )
+    
+    parser.add_argument(
+        '--list-scenarios',
+        action='store_true',
+        help='List all available scenarios and exit'
+    )
+    
+    parser.add_argument(
+        '--scenario',
+        type=str,
+        default=None,
+        help='Scenario to run (default: quiet_market if not specified)'
     )
     
     parser.add_argument(
@@ -215,6 +266,11 @@ Examples:
     
     args = parser.parse_args()
     
+    # Handle --list-scenarios
+    if args.list_scenarios:
+        print(list_scenarios())
+        sys.exit(0)
+    
     try:
         if args.game:
             run_game_mode(
@@ -223,11 +279,17 @@ Examples:
                 random_seed=args.seed
             )
         else:
+            # Use default scenario if none specified
+            scenario_name = args.scenario
+            if scenario_name is None and not args.game:
+                scenario_name = 'quiet_market'
+            
             run_simulation_mode(
                 num_steps=args.steps,
                 num_bonds=args.bonds,
                 verbose=args.verbose,
-                random_seed=args.seed
+                random_seed=args.seed,
+                scenario_name=scenario_name
             )
     except KeyboardInterrupt:
         print("\n\nInterrupted by user. Exiting...")

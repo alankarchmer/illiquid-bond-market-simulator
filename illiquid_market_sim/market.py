@@ -30,6 +30,9 @@ class MarketState:
     # Market parameters
     volatility: float = 0.02
     jump_probability: float = 0.05
+    spread_drift_bps: float = 0.0  # Persistent drift per step
+    sector_shock_prob: float = 0.05
+    idiosyncratic_event_prob: float = 0.03
     
     # History
     _factor_history: List[Dict[str, float]] = field(default_factory=list, repr=False)
@@ -46,7 +49,7 @@ class MarketState:
         """
         Advance market state by one timestep.
         
-        - Evolve factors with Brownian motion
+        - Evolve factors with Brownian motion and drift
         - Occasionally trigger jump events (credit events)
         - Update bond fair prices accordingly
         
@@ -58,10 +61,10 @@ class MarketState:
         # Store current state
         self._factor_history.append(self.get_factors())
         
-        # Evolve factors with correlated Brownian motion
-        ig_shock = random.gauss(0, self.volatility)
-        hy_shock = random.gauss(0, self.volatility * 1.5)  # More volatile
-        em_shock = random.gauss(0, self.volatility * 1.8)
+        # Evolve factors with correlated Brownian motion + drift
+        ig_shock = random.gauss(0, self.volatility) + self.spread_drift_bps
+        hy_shock = random.gauss(0, self.volatility * 1.5) + self.spread_drift_bps * 1.2  # HY drifts more
+        em_shock = random.gauss(0, self.volatility * 1.8) + self.spread_drift_bps * 1.3
         
         self.level_IG += ig_shock
         self.level_HY += hy_shock
@@ -79,61 +82,84 @@ class MarketState:
             
             bond.update_fair_price(new_price)
         
-        # Check for jump events (credit events)
+        # Check for different types of jump events
         event = None
+        
+        # Market-wide shock
         if random.random() < self.jump_probability:
-            event = self._trigger_jump_event(bonds)
+            event = self._trigger_market_shock(bonds)
+        # Sector-specific shock
+        elif random.random() < self.sector_shock_prob:
+            event = self._trigger_sector_shock(bonds)
+        # Idiosyncratic issuer event
+        elif random.random() < self.idiosyncratic_event_prob:
+            event = self._trigger_issuer_event(bonds)
         
         return event
     
-    def _trigger_jump_event(self, bonds: List[Bond]) -> Dict[str, any]:
-        """
-        Trigger a jump event (credit event, sector shock, etc.).
-        """
-        event_type = random.choice(["sector_shock", "issuer_downgrade"])
+    def _trigger_market_shock(self, bonds: List[Bond]) -> Dict[str, any]:
+        """Trigger a broad market shock affecting all sectors."""
+        shock_size = random.uniform(-8, -3)  # Negative = spreads widen
         
-        if event_type == "sector_shock":
-            # Pick a sector and apply a large shock
-            sector = random.choice(["IG", "HY", "EM"])
-            shock_size = random.uniform(-5, -2)  # Negative shock (spreads widen)
-            
-            # Apply to sector factor
-            if sector == "IG":
-                self.level_IG += shock_size
-            elif sector == "HY":
-                self.level_HY += shock_size
-            else:
-                self.level_EM += shock_size
-            
-            # Apply to all bonds in that sector
-            sector_bonds = get_bonds_by_sector(bonds, sector)
-            for bond in sector_bonds:
-                bond.apply_impact(shock_size)
-            
-            return {
-                "type": "sector_shock",
-                "sector": sector,
-                "shock": shock_size,
-                "affected_bonds": len(sector_bonds)
-            }
+        # Apply to all sector factors
+        self.level_IG += shock_size * 0.8
+        self.level_HY += shock_size * 1.2
+        self.level_EM += shock_size * 1.4
         
-        else:  # issuer_downgrade
-            # Pick a random issuer
-            issuers = list(set(b.issuer for b in bonds))
-            issuer = random.choice(issuers)
-            shock_size = random.uniform(-10, -3)  # Larger shock for single issuer
-            
-            # Apply to all bonds of that issuer
-            issuer_bonds = get_bonds_by_issuer(bonds, issuer)
-            for bond in issuer_bonds:
-                bond.apply_impact(shock_size)
-            
-            return {
-                "type": "issuer_downgrade",
-                "issuer": issuer,
-                "shock": shock_size,
-                "affected_bonds": len(issuer_bonds)
-            }
+        # Apply to all bonds
+        for bond in bonds:
+            sector_multiplier = {"IG": 0.8, "HY": 1.2, "EM": 1.4}[bond.sector]
+            bond.apply_impact(shock_size * sector_multiplier)
+        
+        return {
+            "type": "market_shock",
+            "shock": shock_size,
+            "affected_bonds": len(bonds)
+        }
+    
+    def _trigger_sector_shock(self, bonds: List[Bond]) -> Dict[str, any]:
+        """Trigger a sector-specific shock."""
+        sector = random.choice(["IG", "HY", "EM"])
+        shock_size = random.uniform(-6, -2)  # Negative shock (spreads widen)
+        
+        # Apply to sector factor
+        if sector == "IG":
+            self.level_IG += shock_size
+        elif sector == "HY":
+            self.level_HY += shock_size
+        else:
+            self.level_EM += shock_size
+        
+        # Apply to all bonds in that sector
+        sector_bonds = get_bonds_by_sector(bonds, sector)
+        for bond in sector_bonds:
+            bond.apply_impact(shock_size)
+        
+        return {
+            "type": "sector_shock",
+            "sector": sector,
+            "shock": shock_size,
+            "affected_bonds": len(sector_bonds)
+        }
+    
+    def _trigger_issuer_event(self, bonds: List[Bond]) -> Dict[str, any]:
+        """Trigger an idiosyncratic issuer event (downgrade, rumor, etc.)."""
+        # Pick a random issuer
+        issuers = list(set(b.issuer for b in bonds))
+        issuer = random.choice(issuers)
+        shock_size = random.uniform(-12, -3)  # Large shock for single issuer
+        
+        # Apply to all bonds of that issuer
+        issuer_bonds = get_bonds_by_issuer(bonds, issuer)
+        for bond in issuer_bonds:
+            bond.apply_impact(shock_size)
+        
+        return {
+            "type": "issuer_event",
+            "issuer": issuer,
+            "shock": shock_size,
+            "affected_bonds": len(issuer_bonds)
+        }
     
     def get_fair_price(self, bond: Bond) -> float:
         """
@@ -155,17 +181,26 @@ class MarketImpactModel:
         self,
         base_impact_coeff: float = 0.001,
         cross_impact_factor: float = 0.3,
-        impact_decay: float = 0.5
+        impact_decay: float = 0.5,
+        liquidity_multiplier: float = 1.0,
+        impact_cross_issuer: float = 0.3,
+        impact_cross_sector: float = 0.1
     ):
         """
         Args:
             base_impact_coeff: Base impact per unit size
-            cross_impact_factor: Fraction of impact that spills to related bonds
+            cross_impact_factor: Fraction of impact that spills to related bonds (legacy)
             impact_decay: Not used yet, for future: how impact decays over time
+            liquidity_multiplier: Multiplier for liquidity (>1 = worse liquidity)
+            impact_cross_issuer: Fraction of impact spilling to same issuer
+            impact_cross_sector: Fraction of impact spilling to same sector
         """
         self.base_impact_coeff = base_impact_coeff
         self.cross_impact_factor = cross_impact_factor
         self.impact_decay = impact_decay
+        self.liquidity_multiplier = liquidity_multiplier
+        self.impact_cross_issuer = impact_cross_issuer
+        self.impact_cross_sector = impact_cross_sector
     
     def apply_trade_impact(
         self,
@@ -193,33 +228,33 @@ class MarketImpactModel:
         # If dealer sells, price moves down (negative impact)
         direction = 1.0 if side == "buy" else -1.0
         
-        # Impact inversely proportional to liquidity
+        # Impact inversely proportional to liquidity, scaled by liquidity multiplier
         liquidity_factor = max(traded_bond.liquidity, 0.01)  # Avoid division by zero
+        effective_liquidity = liquidity_factor / self.liquidity_multiplier
+        
         direct_impact = (
             direction * 
             self.base_impact_coeff * 
-            size / liquidity_factor
+            size / effective_liquidity
         )
         
         traded_bond.apply_impact(direct_impact)
         impacts[traded_bond.id] = direct_impact
         
         # Cross-impact on related bonds
-        cross_impact = direct_impact * self.cross_impact_factor
-        
         for bond in all_bonds:
             if bond.id == traded_bond.id:
                 continue
             
-            # Impact same issuer more
+            # Impact same issuer bonds
             if bond.issuer == traded_bond.issuer:
-                impact = cross_impact * 0.8
+                impact = direct_impact * self.impact_cross_issuer
                 bond.apply_impact(impact)
                 impacts[bond.id] = impact
             
-            # Impact same sector less
+            # Impact same sector bonds
             elif bond.sector == traded_bond.sector:
-                impact = cross_impact * 0.3
+                impact = direct_impact * self.impact_cross_sector
                 bond.apply_impact(impact)
                 impacts[bond.id] = impact
         

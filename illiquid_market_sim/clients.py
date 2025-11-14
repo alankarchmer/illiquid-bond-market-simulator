@@ -53,7 +53,8 @@ class Client(ABC):
         rfq_probability: float = 0.1,
         mean_size: float = 1.0,
         size_std: float = 0.5,
-        sector_preferences: Optional[dict] = None
+        sector_preferences: Optional[dict] = None,
+        buy_sell_skew: float = 0.0
     ):
         """
         Args:
@@ -64,6 +65,7 @@ class Client(ABC):
             mean_size: Average trade size
             size_std: Standard deviation of trade size
             sector_preferences: Dict mapping sector to preference weight
+            buy_sell_skew: -1.0 (all sells) to +1.0 (all buys), 0.0 = neutral
         """
         self.client_id = client_id
         self.name = name
@@ -72,6 +74,7 @@ class Client(ABC):
         self.mean_size = mean_size
         self.size_std = size_std
         self.sector_preferences = sector_preferences or {}
+        self.buy_sell_skew = buy_sell_skew
         
         # Internal state
         self._rfq_counter = 0
@@ -97,7 +100,17 @@ class Client(ABC):
             return None
         
         # Determine side and size
-        side = random.choice(["buy", "sell"])
+        # Apply buy_sell_skew: -1 = all sells, +1 = all buys, 0 = neutral
+        if self.buy_sell_skew == 0.0:
+            side = random.choice(["buy", "sell"])
+        else:
+            # Convert skew to probability of buy
+            # skew = -1 -> p_buy = 0
+            # skew = 0 -> p_buy = 0.5
+            # skew = 1 -> p_buy = 1
+            p_buy = (self.buy_sell_skew + 1.0) / 2.0
+            side = "buy" if random.random() < p_buy else "sell"
+        
         size = max(0.1, random.gauss(self.mean_size, self.size_std))
         
         # Determine if this is fishing
@@ -356,5 +369,70 @@ def create_client_universe(
             client_id=f"NO{i+1:02d}",
             name=f"Noise Trader {i+1}"
         ))
+    
+    return clients
+
+
+def create_clients_from_scenario(
+    client_counts: dict,
+    rfq_probability_multiplier: float = 1.0,
+    size_multiplier: float = 1.0
+) -> List[Client]:
+    """
+    Create a universe of clients based on scenario specifications.
+    
+    Args:
+        client_counts: Dictionary with counts per type (from ScenarioConfig.get_total_client_count())
+        rfq_probability_multiplier: Scale all client RFQ probabilities
+        size_multiplier: Scale all client trade sizes
+        
+    Returns:
+        List of Client objects
+    """
+    clients = []
+    
+    # Real money clients
+    num_rm = client_counts.get('real_money', 0)
+    for i in range(num_rm):
+        client = RealMoneyClient(
+            client_id=f"RM{i+1:02d}",
+            name=f"Real Money Fund {i+1}"
+        )
+        client.rfq_probability *= rfq_probability_multiplier
+        client.mean_size *= size_multiplier
+        clients.append(client)
+    
+    # Hedge fund clients
+    num_hf = client_counts.get('hedge_fund', 0)
+    for i in range(num_hf):
+        client = HedgeFundClient(
+            client_id=f"HF{i+1:02d}",
+            name=f"Hedge Fund {i+1}"
+        )
+        client.rfq_probability *= rfq_probability_multiplier
+        client.mean_size *= size_multiplier
+        clients.append(client)
+    
+    # Fisher clients
+    num_fisher = client_counts.get('fisher', 0)
+    for i in range(num_fisher):
+        client = FisherClient(
+            client_id=f"FI{i+1:02d}",
+            name=f"Fisher {i+1}"
+        )
+        client.rfq_probability *= rfq_probability_multiplier
+        client.mean_size *= size_multiplier
+        clients.append(client)
+    
+    # Noise clients
+    num_noise = client_counts.get('noise', 0)
+    for i in range(num_noise):
+        client = NoiseClient(
+            client_id=f"NO{i+1:02d}",
+            name=f"Noise Trader {i+1}"
+        )
+        client.rfq_probability *= rfq_probability_multiplier
+        client.mean_size *= size_multiplier
+        clients.append(client)
     
     return clients

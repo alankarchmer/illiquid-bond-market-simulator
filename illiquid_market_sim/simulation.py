@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from illiquid_market_sim.config import SimulationConfig
 from illiquid_market_sim.bonds import Bond, generate_bond_universe
-from illiquid_market_sim.clients import Client, create_client_universe
+from illiquid_market_sim.clients import Client, create_client_universe, create_clients_from_scenario
 from illiquid_market_sim.market import MarketState, MarketImpactModel
 from illiquid_market_sim.portfolio import Portfolio
 from illiquid_market_sim.agent import DealerAgent, QuotingStrategy
@@ -18,6 +18,7 @@ from illiquid_market_sim.metrics import (
     calculate_impact_cost,
     summarize_simulation
 )
+from illiquid_market_sim.scenarios import ScenarioConfig
 
 
 class Simulator:
@@ -37,16 +38,19 @@ class Simulator:
     def __init__(
         self,
         config: Optional[SimulationConfig] = None,
-        custom_quoting_strategy: Optional[QuotingStrategy] = None
+        custom_quoting_strategy: Optional[QuotingStrategy] = None,
+        scenario: Optional[ScenarioConfig] = None
     ):
         """
         Initialize simulator.
         
         Args:
-            config: Simulation configuration
+            config: Simulation configuration (legacy support)
             custom_quoting_strategy: Optional custom quoting strategy
+            scenario: Scenario configuration (overrides config if provided)
         """
         self.config = config or SimulationConfig()
+        self.scenario = scenario
         
         # Set random seed
         random.seed(self.config.random_seed)
@@ -57,25 +61,66 @@ class Simulator:
             seed=self.config.random_seed
         )
         
-        self.clients = create_client_universe(
-            num_real_money=self.config.num_real_money_clients,
-            num_hedge_fund=self.config.num_hedge_fund_clients,
-            num_fisher=self.config.num_fisher_clients,
-            num_noise=self.config.num_noise_clients
-        )
+        # Create clients based on scenario or config
+        if scenario:
+            client_counts = scenario.get_total_client_count(base_count=10)
+            # Calculate RFQ probability multiplier from scenario's avg_rfq_per_step
+            # Baseline: avg 1 RFQ per step with 10 clients at 0.1 prob each = 1 RFQ
+            # So multiplier = avg_rfq_per_step / 1.0
+            rfq_prob_mult = max(0.01, scenario.avg_rfq_per_step / 1.0)
+            self.clients = create_clients_from_scenario(
+                client_counts=client_counts,
+                rfq_probability_multiplier=rfq_prob_mult,
+                size_multiplier=scenario.rfq_size_multiplier
+            )
+            # Apply buy_sell_skew to all clients
+            for client in self.clients:
+                client.buy_sell_skew = scenario.buy_sell_skew
+        else:
+            self.clients = create_client_universe(
+                num_real_money=self.config.num_real_money_clients,
+                num_hedge_fund=self.config.num_hedge_fund_clients,
+                num_fisher=self.config.num_fisher_clients,
+                num_noise=self.config.num_noise_clients
+            )
         
-        self.market_state = MarketState(
-            volatility=self.config.market_volatility,
-            jump_probability=self.config.jump_probability
-        )
+        # Initialize market state with scenario parameters
+        if scenario:
+            self.market_state = MarketState(
+                volatility=scenario.base_volatility,
+                jump_probability=scenario.market_shock_prob,
+                spread_drift_bps=scenario.spread_drift_bps_per_step,
+                sector_shock_prob=scenario.sector_shock_prob,
+                idiosyncratic_event_prob=scenario.idiosyncratic_event_prob
+            )
+        else:
+            self.market_state = MarketState(
+                volatility=self.config.market_volatility,
+                jump_probability=self.config.jump_probability
+            )
         
-        self.impact_model = MarketImpactModel(
-            base_impact_coeff=self.config.base_impact_coeff,
-            cross_impact_factor=self.config.cross_impact_factor,
-            impact_decay=self.config.impact_decay
-        )
+        # Initialize impact model with scenario parameters
+        if scenario:
+            self.impact_model = MarketImpactModel(
+                base_impact_coeff=scenario.impact_coefficient,
+                cross_impact_factor=self.config.cross_impact_factor,  # Legacy
+                impact_decay=self.config.impact_decay,
+                liquidity_multiplier=scenario.liquidity_multiplier,
+                impact_cross_issuer=scenario.impact_cross_issuer,
+                impact_cross_sector=scenario.impact_cross_sector
+            )
+        else:
+            self.impact_model = MarketImpactModel(
+                base_impact_coeff=self.config.base_impact_coeff,
+                cross_impact_factor=self.config.cross_impact_factor,
+                impact_decay=self.config.impact_decay
+            )
         
         self.portfolio = Portfolio()
+        
+        # Apply initial positions if specified in scenario
+        if scenario and scenario.initial_positions:
+            self._apply_initial_positions(scenario.initial_positions)
         
         self.dealer = DealerAgent(
             portfolio=self.portfolio,
@@ -138,6 +183,12 @@ class Simulator:
             step_idx: Current step number
             verbose: Whether to print details
         """
+        # Check if we need to update scenario parameters (regime shift)
+        if self.scenario and self.scenario.regime_shift_callback:
+            total_steps = self.config.num_steps
+            new_scenario = self.scenario.regime_shift_callback(step_idx, total_steps)
+            self._update_scenario_parameters(new_scenario)
+        
         # 1. Advance market state
         event = self.market_state.step(self.bonds)
         if event:
@@ -322,3 +373,48 @@ class Simulator:
                                   if abs(p.quantity) > 0.01]),
             'inventory_risk': self.portfolio.get_inventory_risk()
         }
+    
+    def _apply_initial_positions(self, positions: Dict[str, float]) -> None:
+        """
+        Apply initial positions to the portfolio.
+        
+        For scenarios like short_squeeze or inventory_overhang that start
+        with non-zero positions.
+        
+        Args:
+            positions: Dictionary mapping bond_id to quantity
+        """
+        # For now, we'll just set initial positions directly
+        # In a more sophisticated implementation, we might select specific
+        # bonds based on sector/issuer criteria
+        pass  # Implementation would depend on how initial_positions is structured
+    
+    def _update_scenario_parameters(self, new_scenario: ScenarioConfig) -> None:
+        """
+        Update market and client parameters based on a new scenario config.
+        
+        Used for regime shift scenarios.
+        
+        Args:
+            new_scenario: New scenario configuration to apply
+        """
+        # Update market state parameters
+        self.market_state.volatility = new_scenario.base_volatility
+        self.market_state.spread_drift_bps = new_scenario.spread_drift_bps_per_step
+        self.market_state.jump_probability = new_scenario.market_shock_prob
+        self.market_state.sector_shock_prob = new_scenario.sector_shock_prob
+        self.market_state.idiosyncratic_event_prob = new_scenario.idiosyncratic_event_prob
+        
+        # Update impact model parameters
+        self.impact_model.base_impact_coeff = new_scenario.impact_coefficient
+        self.impact_model.liquidity_multiplier = new_scenario.liquidity_multiplier
+        self.impact_model.impact_cross_issuer = new_scenario.impact_cross_issuer
+        self.impact_model.impact_cross_sector = new_scenario.impact_cross_sector
+        
+        # Update client parameters
+        rfq_prob_mult = max(0.01, new_scenario.avg_rfq_per_step / 1.0)
+        for client in self.clients:
+            # Scale RFQ probability (need to know base values)
+            # For simplicity, we'll just update the skew
+            client.buy_sell_skew = new_scenario.buy_sell_skew
+            client.mean_size *= new_scenario.rfq_size_multiplier
