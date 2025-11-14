@@ -39,19 +39,38 @@ class Position:
             size: Quantity traded
             price: Execution price
         """
+        old_quantity = self.quantity
+        
         if side == "buy":
-            self.quantity += size
-            self.total_cost += size * price
+            new_quantity = old_quantity + size
         else:  # sell
-            self.quantity -= size
-            self.total_cost -= size * price
+            new_quantity = old_quantity - size
         
-        self.trades += 1
+        # Check if position crosses zero (reverses direction)
+        crosses_zero = (old_quantity > 0 and new_quantity < 0) or (old_quantity < 0 and new_quantity > 0)
         
-        # If position crosses zero or goes to zero, reset cost basis
-        if abs(self.quantity) < 1e-6:
+        if crosses_zero:
+            # Position is reversing - need to reset cost basis for new position
+            # The remaining size after closing the old position
+            remaining_size = abs(new_quantity)
+            
+            # Set new cost basis for the new position
+            self.quantity = new_quantity
+            self.total_cost = remaining_size * price
+        elif abs(new_quantity) < 1e-6:
+            # Position goes to exactly zero - reset everything
             self.quantity = 0.0
             self.total_cost = 0.0
+        else:
+            # Normal case - adding to or reducing position without crossing zero
+            if side == "buy":
+                self.quantity += size
+                self.total_cost += size * price
+            else:  # sell
+                self.quantity -= size
+                self.total_cost -= size * price
+        
+        self.trades += 1
     
     def get_market_value(self, current_price: float) -> float:
         """Get current market value of position."""
@@ -119,7 +138,8 @@ class Portfolio:
             elif side == "buy" and old_quantity < 0:
                 # Buying to cover a short position
                 size_reduced = min(size, abs(old_quantity))
-                realized = size_reduced * (old_avg_cost - price)
+                # For short positions, old_avg_cost is negative, so use absolute value
+                realized = size_reduced * (abs(old_avg_cost) - price)
                 self.realized_pnl += realized
     
     def mark_to_market(self, bonds: List[Bond]) -> Dict[str, float]:
@@ -150,10 +170,21 @@ class Portfolio:
             
             # Use naive mid as the marking price (dealer doesn't know true fair value)
             # In a real system, this would be the dealer's internal mark
-            # For now, use last traded price or a fallback
-            current_price = bond.get_last_traded_price()
-            if current_price is None:
-                current_price = bond.get_true_fair_price()  # Fallback
+            # Blend last traded price with true fair to avoid outlier issues
+            last_price = bond.get_last_traded_price()
+            true_fair = bond.get_true_fair_price()
+            
+            if last_price is None:
+                # No trades yet, use true fair
+                current_price = true_fair
+            elif abs(last_price - true_fair) > 50:
+                # Last trade was an outlier (e.g., 999.00 from "pass" quotes)
+                # Use true fair instead
+                current_price = true_fair
+            else:
+                # Blend last price with fair value for more realistic marking
+                # Weight more towards last price (70%) as it's observable
+                current_price = 0.7 * last_price + 0.3 * true_fair
             
             market_value = position.get_market_value(current_price)
             pos_unrealized = position.get_unrealized_pnl(current_price)
