@@ -328,33 +328,59 @@ def create_client_universe(
     num_real_money: int = 3,
     num_hedge_fund: int = 2,
     num_fisher: int = 2,
-    num_noise: int = 3
+    num_noise: int = 3,
+    rfq_prob_per_client: Optional[float] = None
 ) -> List[Client]:
-    """Create a universe of clients with different types."""
+    """
+    Create a universe of clients with different types.
+    
+    Args:
+        num_real_money: Number of real money clients
+        num_hedge_fund: Number of hedge fund clients
+        num_fisher: Number of fisher clients
+        num_noise: Number of noise trader clients
+        rfq_prob_per_client: If provided, overrides the default rfq_probability
+                            for all client types
+    
+    Returns:
+        List of Client instances
+    """
     clients = []
     
     for i in range(num_real_money):
-        clients.append(RealMoneyClient(
+        client = RealMoneyClient(
             client_id=f"RM{i+1:02d}",
             name=f"Real Money Fund {i+1}"
-        ))
+        )
+        if rfq_prob_per_client is not None:
+            client.rfq_probability = rfq_prob_per_client
+        clients.append(client)
     
     for i in range(num_hedge_fund):
-        clients.append(HedgeFundClient(
+        client = HedgeFundClient(
             client_id=f"HF{i+1:02d}",
             name=f"Hedge Fund {i+1}"
-        ))
+        )
+        if rfq_prob_per_client is not None:
+            client.rfq_probability = rfq_prob_per_client
+        clients.append(client)
     
     for i in range(num_fisher):
-        clients.append(FisherClient(
+        client = FisherClient(
             client_id=f"FI{i+1:02d}",
             name=f"Fisher {i+1}"
-        ))
+        )
+        if rfq_prob_per_client is not None:
+            client.rfq_probability = rfq_prob_per_client
+        clients.append(client)
     
     for i in range(num_noise):
-        clients.append(NoiseClient(
+        client = NoiseClient(
             client_id=f"NO{i+1:02d}",
             name=f"Noise Trader {i+1}"
-        ))
+        )
+        if rfq_prob_per_client is not None:
+            client.rfq_probability = rfq_prob_per_client
+        clients.append(client)
     
     return clients
