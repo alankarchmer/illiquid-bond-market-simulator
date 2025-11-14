@@ -61,7 +61,8 @@ class Simulator:
             num_real_money=self.config.num_real_money_clients,
             num_hedge_fund=self.config.num_hedge_fund_clients,
             num_fisher=self.config.num_fisher_clients,
-            num_noise=self.config.num_noise_clients
+            num_noise=self.config.num_noise_clients,
+            rfq_prob_per_client=self.config.rfq_prob_per_client
         )
         
         self.market_state = MarketState(
