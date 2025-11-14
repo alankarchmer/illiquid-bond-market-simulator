@@ -135,6 +135,16 @@ class Simulator:
         
         self._trade_counter = 0
         self._bonds_dict = {b.id: b for b in self.bonds}
+        
+        # Store base client parameters for regime shifts
+        # (to avoid exponential growth when parameters are updated)
+        self._client_base_params = {
+            client.client_id: {
+                'mean_size': client.mean_size,
+                'rfq_probability': client.rfq_probability
+            }
+            for client in self.clients
+        }
     
     def run(
         self,
@@ -414,7 +424,12 @@ class Simulator:
         # Update client parameters
         rfq_prob_mult = max(0.01, new_scenario.avg_rfq_per_step / 1.0)
         for client in self.clients:
-            # Scale RFQ probability (need to know base values)
-            # For simplicity, we'll just update the skew
+            # Get base values to avoid exponential growth
+            base_params = self._client_base_params.get(client.client_id, {})
+            base_mean_size = base_params.get('mean_size', client.mean_size)
+            base_rfq_prob = base_params.get('rfq_probability', client.rfq_probability)
+            
+            # Set values from base * multiplier (not *= which compounds)
             client.buy_sell_skew = new_scenario.buy_sell_skew
-            client.mean_size *= new_scenario.rfq_size_multiplier
+            client.mean_size = base_mean_size * new_scenario.rfq_size_multiplier
+            client.rfq_probability = base_rfq_prob * rfq_prob_mult
