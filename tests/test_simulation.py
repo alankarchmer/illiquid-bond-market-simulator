@@ -197,3 +197,46 @@ def test_simulation_market_events():
     # Events are tracked internally in sim.events
     # (Not exposed in result currently, but simulation should not crash)
     assert result.total_steps == 100
+
+
+def test_position_reversal_cost_basis():
+    """Test that position reversals correctly track cost basis."""
+    from illiquid_market_sim.portfolio import Portfolio
+    
+    portfolio = Portfolio()
+    
+    # Start with a long position: buy 3 at $100
+    portfolio.update_on_trade("BOND1", "buy", 3.0, 100.0)
+    position = portfolio.get_position("BOND1")
+    
+    assert position.quantity == 3.0
+    assert position.total_cost == 300.0
+    assert position.get_average_cost() == 100.0
+    
+    # Sell 5 at $110 - this crosses zero and creates a short 2 position
+    portfolio.update_on_trade("BOND1", "sell", 5.0, 110.0)
+    
+    # After crossing zero, should have:
+    # - quantity = -2 (short 2)
+    # - total_cost = 220 (2 * 110), not -250 (300 - 550)
+    assert position.quantity == -2.0
+    assert position.total_cost == 220.0, f"Expected total_cost=220.0, got {position.total_cost}"
+    # Average cost for short position is negative (total_cost / quantity = 220 / -2 = -110)
+    assert position.get_average_cost() == -110.0
+    
+    # Realized P&L should be 3 * (110 - 100) = 30
+    assert abs(portfolio.realized_pnl - 30.0) < 0.01
+    
+    # Now test the reverse: buy 4 at $105 to go from short 2 to long 2
+    portfolio.update_on_trade("BOND1", "buy", 4.0, 105.0)
+    
+    # After crossing zero again, should have:
+    # - quantity = 2 (long 2)
+    # - total_cost = 210 (2 * 105)
+    assert position.quantity == 2.0
+    assert position.total_cost == 210.0, f"Expected total_cost=210.0, got {position.total_cost}"
+    assert position.get_average_cost() == 105.0
+    
+    # Realized P&L should include closing short: 2 * (110 - 105) = 10
+    # Total realized: 30 + 10 = 40
+    assert abs(portfolio.realized_pnl - 40.0) < 0.01
