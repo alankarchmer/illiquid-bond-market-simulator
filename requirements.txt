@@ -1,0 +1,12 @@
+# Python 3.11+ required
+
+# Core dependencies (minimal)
+# Using standard library as much as possible
+
+# Optional: for data analysis and visualization
+pandas>=2.0.0
+matplotlib>=3.7.0
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
