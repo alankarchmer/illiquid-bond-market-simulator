@@ -170,10 +170,21 @@ class Portfolio:
             
             # Use naive mid as the marking price (dealer doesn't know true fair value)
             # In a real system, this would be the dealer's internal mark
-            # For now, use last traded price or a fallback
-            current_price = bond.get_last_traded_price()
-            if current_price is None:
-                current_price = bond.get_true_fair_price()  # Fallback
+            # Blend last traded price with true fair to avoid outlier issues
+            last_price = bond.get_last_traded_price()
+            true_fair = bond.get_true_fair_price()
+            
+            if last_price is None:
+                # No trades yet, use true fair
+                current_price = true_fair
+            elif abs(last_price - true_fair) > 50:
+                # Last trade was an outlier (e.g., 999.00 from "pass" quotes)
+                # Use true fair instead
+                current_price = true_fair
+            else:
+                # Blend last price with fair value for more realistic marking
+                # Weight more towards last price (70%) as it's observable
+                current_price = 0.7 * last_price + 0.3 * true_fair
             
             market_value = position.get_market_value(current_price)
             pos_unrealized = position.get_unrealized_pnl(current_price)
