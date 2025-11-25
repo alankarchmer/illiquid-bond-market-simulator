@@ -2,11 +2,23 @@
 
 # Core dependencies (minimal)
 # Using standard library as much as possible
+numpy>=1.24.0
 
 # Optional: for data analysis and visualization
 pandas>=2.0.0
 matplotlib>=3.7.0
 
+# Optional: for RL training
+# gymnasium>=0.29.0
+# stable-baselines3>=2.0.0
+
+# Optional: for offline RL data storage
+# pyarrow>=14.0.0
+
+# Optional: for experiment tracking
+# wandb>=0.16.0
+
 # Development dependencies (optional)
 # pytest>=7.0.0
 # pytest-cov>=4.0.0
+# hypothesis>=6.0.0

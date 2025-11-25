@@ -340,15 +340,60 @@ YOUR PERFORMANCE
 ✓ Well-managed inventory: 12.3
 ```
 
+## Reinforcement Learning
+
+The simulator includes a complete RL environment compatible with Gymnasium/PettingZoo:
+
+```python
+from illiquid_market_sim import TradingEnv, EnvConfig
+
+# Create environment
+env = TradingEnv(EnvConfig(max_episode_steps=100))
+
+# Standard Gymnasium API
+obs, info = env.reset(seed=42)
+action = env.action_space_sample()
+obs, reward, terminated, truncated, info = env.step(action)
+```
+
+### Key RL Features
+
+- **Gymnasium-compatible API**: Works with Stable-Baselines3, CleanRL, etc.
+- **Multiple action types**: Continuous spread, discrete spread, accept/reject
+- **Configurable rewards**: PnL, risk-adjusted PnL, execution quality, Sharpe
+- **Multi-agent mode**: PettingZoo-style API for competitive market making
+- **Baseline agents**: Random, fixed spread, inventory-aware, adaptive, etc.
+- **Offline RL support**: Data collection and loading utilities
+
+See **[RL_GUIDE.md](RL_GUIDE.md)** for comprehensive documentation.
+
+### Quick RL Example
+
+```python
+from illiquid_market_sim import TradingEnv, EnvConfig, RewardType
+from illiquid_market_sim.baselines import AdaptiveAgent
+from illiquid_market_sim.rl import evaluate_policy
+
+# Create environment with risk-adjusted rewards
+config = EnvConfig(
+    max_episode_steps=100,
+    reward_type=RewardType.RISK_ADJUSTED_PNL,
+)
+env = TradingEnv(config)
+
+# Evaluate a baseline agent
+agent = AdaptiveAgent()
+result = evaluate_policy(env, agent.get_policy(), n_episodes=10)
+print(f"Mean reward: {result.mean_reward:.2f}")
+```
+
 ## Future Enhancements
 
-Potential extensions (not yet implemented):
-- **AI Agent Integration**: Hook in RL agents or LLMs for quoting
-- **Multi-dealer Competition**: Multiple dealers competing for flows
-- **Advanced Features**: Greeks tracking, hedging strategies, client segmentation
+Potential extensions:
+- **Advanced RL**: Curriculum learning, multi-objective rewards
+- **LLM Integration**: Language model-based trading strategies
 - **Visualization**: Real-time P&L charts, position heatmaps
 - **Historical Replay**: Replay actual market scenarios
-- **Benchmark Strategies**: Compare your performance against different strategies
 
 ## Design Philosophy
 

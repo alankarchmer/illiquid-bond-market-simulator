@@ -368,22 +368,115 @@ def example_llm_agent():
     print()
 
 
+def example_gymnasium_env():
+    """Example: Using the Gymnasium-compatible RL environment."""
+    print("Running Gymnasium-compatible RL environment...")
+    
+    from illiquid_market_sim import TradingEnv, EnvConfig, RewardType
+    from illiquid_market_sim.baselines import AdaptiveAgent
+    from illiquid_market_sim.rl import evaluate_policy
+    
+    # Create environment
+    config = EnvConfig(
+        max_episode_steps=50,
+        reward_type=RewardType.RISK_ADJUSTED_PNL,
+    )
+    env = TradingEnv(config)
+    
+    # Run with adaptive baseline agent
+    agent = AdaptiveAgent()
+    result = evaluate_policy(env, agent.get_policy(), n_episodes=5, seed=42)
+    
+    print(f"Adaptive agent: mean_reward={result.mean_reward:.2f}, mean_pnl={result.mean_pnl:.2f}")
+    print()
+
+
+def example_benchmark_baselines():
+    """Example: Benchmarking baseline agents."""
+    print("Benchmarking baseline agents...")
+    
+    from illiquid_market_sim import TradingEnv, EnvConfig
+    from illiquid_market_sim.baselines import (
+        RandomAgent,
+        FixedSpreadAgent,
+        InventoryAwareAgent,
+        AdaptiveAgent,
+        ConservativeAgent,
+        AggressiveAgent,
+    )
+    from illiquid_market_sim.rl import evaluate_policy
+    
+    env = TradingEnv(EnvConfig(max_episode_steps=50))
+    
+    agents = {
+        "random": RandomAgent(),
+        "fixed_50": FixedSpreadAgent(0.5),
+        "inventory_aware": InventoryAwareAgent(),
+        "adaptive": AdaptiveAgent(),
+        "conservative": ConservativeAgent(),
+        "aggressive": AggressiveAgent(),
+    }
+    
+    print(f"{'Agent':<20} {'Mean Reward':>12} {'Mean PnL':>10}")
+    print("-" * 45)
+    
+    for name, agent in agents.items():
+        result = evaluate_policy(env, agent.get_policy(), n_episodes=5, seed=42)
+        print(f"{name:<20} {result.mean_reward:>12.2f} {result.mean_pnl:>10.2f}")
+    print()
+
+
+def example_collect_offline_data():
+    """Example: Collecting data for offline RL."""
+    print("Collecting offline RL data...")
+    
+    from illiquid_market_sim import TradingEnv, EnvConfig
+    from illiquid_market_sim.baselines import AdaptiveAgent
+    from illiquid_market_sim.rl import DataCollector
+    
+    env = TradingEnv(EnvConfig(max_episode_steps=50))
+    agent = AdaptiveAgent()
+    
+    collector = DataCollector(env, max_transitions=500)
+    rewards = collector.collect_episodes(
+        n_episodes=10,
+        policy=agent.get_policy(),
+        seed=42,
+        verbose=False,
+    )
+    
+    print(f"Collected {collector.n_transitions} transitions from {collector.n_episodes} episodes")
+    print(f"Mean episode reward: {sum(rewards)/len(rewards):.2f}")
+    
+    # Save dataset
+    # collector.save("data/adaptive_agent.npz")
+    print()
+
+
 if __name__ == '__main__':
     print("=" * 70)
     print("AI AGENT EXAMPLES FOR ILLIQUID BOND MARKET SIMULATOR")
     print("=" * 70)
     print()
     
+    # Legacy examples (using custom strategies with Simulator)
+    print("=== Legacy Examples (Custom Strategies) ===")
     example_ml_strategy()
     example_rl_agent()
     example_llm_agent()
+    
+    # New RL environment examples
+    print("=== RL Environment Examples ===")
+    example_gymnasium_env()
+    example_benchmark_baselines()
+    example_collect_offline_data()
     
     print("=" * 70)
     print("All examples completed!")
     print()
     print("Next steps:")
-    print("1. Replace dummy models with your trained models")
-    print("2. Add training loops for RL agents")
-    print("3. Integrate your LLM API")
-    print("4. Run backtests and compare strategies")
+    print("1. See RL_GUIDE.md for comprehensive RL documentation")
+    print("2. Train with Stable-Baselines3 or your preferred library")
+    print("3. Collect offline data and train with offline RL")
+    print("4. Run benchmarks to compare against baselines")
     print("=" * 70)
